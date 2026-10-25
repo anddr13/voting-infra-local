@@ -1,0 +1,11 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: voting-local
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # Traefik's web entrypoint is NodePort 30080 (envs/local.yaml in voting-gitops).
+      - containerPort: 30080
+        hostPort: 8090
+        listenAddress: "127.0.0.1"
+        protocol: TCP

@@ -1,0 +1,22 @@
+# The same "root" Application the cloud stacks create, with the local overrides.
+applications:
+  root:
+    namespace: argocd
+    project: default
+    finalizers:
+      - resources-finalizer.argocd.argoproj.io
+    source:
+      repoURL: https://github.com/anddr13/voting-gitops.git
+      targetRevision: main
+      path: apps
+      helm:
+        valueFiles:
+          - values.yaml
+          - ../envs/local.yaml
+    destination:
+      server: https://kubernetes.default.svc
+      namespace: argocd
+    syncPolicy:
+      automated:
+        prune: true
+        selfHeal: true

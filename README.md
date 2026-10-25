@@ -1,0 +1,49 @@
+# voting-infra-local
+
+The free, local stand-in for `voting-infra-{azure,aws,gcp}`: a [kind](https://kind.sigs.k8s.io/) cluster with
+Argo CD and the same `root` Application the cloud stacks create. Argo CD then deploys everything from
+[voting-gitops](https://github.com/anddr13/voting-gitops) exactly as in the clouds: Traefik, KEDA, Strimzi,
+Kafka, Redis, MongoDB and the [voting-app](https://github.com/anddr13/voting-app) services.
+
+Use it to check a change to the charts end to end before paying for a cloud cluster.
+
+| | Clouds | Here |
+|---|---|---|
+| Cluster | AKS / EKS / GKE via Terraform | kind, 1 node, in Docker |
+| Argo CD install | `helm_release` in `infra/argocd.tf` | `helm upgrade --install`, same values (`argocd-values.yaml`) |
+| GitOps overrides | `envs/<cloud>.yaml` | `envs/local.yaml`: Traefik on NodePort 30080 → `localhost:8090` |
+| Cost | ~$0.09–0.23/h | $0 |
+
+## Requirements
+
+Docker (≈4 GiB of memory free for the stack), `kind`, `helm`, `kubectl`, `bash` (Git Bash on Windows works).
+
+## Usage
+
+```bash
+scripts/up.sh      # ~10-15 minutes on the first run; prints http://localhost:8090 when the app answers
+scripts/down.sh    # deletes the cluster
+```
+
+kubectl access:
+
+```bash
+export KUBECONFIG=~/.kube/kind-voting-local.yaml
+kubectl -n argocd get applications                     # waves: traefik/keda/strimzi → data → voting
+kubectl -n voting get kafka,kafkatopic,pods
+kubectl -n voting get scaledobject,hpa -w              # in another terminal run the k6 test (below)
+kubectl -n argocd port-forward svc/argocd-server 8443:443
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+```
+
+Load test, to watch KEDA scale the worker on Kafka consumer lag:
+
+```bash
+docker run --rm -i -e BASE_URL=http://host.docker.internal:8090 grafana/k6:2.3.0 run - < ../voting-app/loadtest/votes.js
+```
+
+## Safety
+
+The cluster lives in its own kubeconfig file (`~/.kube/kind-voting-local.yaml`): the scripts never read or modify
+`~/.kube/config` or switch its current context, and `up.sh` refuses to install anything unless kubectl points at
+`kind-voting-local`.
