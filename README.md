@@ -39,8 +39,38 @@ kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.pas
 Load test, to watch KEDA scale the worker on Kafka consumer lag:
 
 ```bash
-docker run --rm -i -e BASE_URL=http://host.docker.internal:8090 grafana/k6:2.3.0 run - < ../voting-app/loadtest/votes.js
+# straight to the node's NodePort on the kind docker network
+docker run --rm -i --network kind -e BASE_URL=http://voting-local-control-plane:30080 \
+  grafana/k6:2.3.0 run - < ../voting-app/loadtest/votes.js
 ```
+
+## Results (measured 2026-10-26)
+
+Laptop, Docker Desktop with 16 CPUs / 7.6 GiB, kind v0.33 (Kubernetes 1.37), worker `PROCESSING_DELAY_MS=20`.
+
+**Cold start:** `scripts/up.sh` from nothing to the app answering on `localhost:8090` took **5 min 23 s**
+(kind cluster, Argo CD, then the waves: Traefik/KEDA/Strimzi → Kafka/Redis/MongoDB → app).
+
+**Load:** k6 at 200 votes/s for 3 minutes, each request from a different client id.
+
+| Time | Worker replicas | Consumer lag |
+|---|---|---|
+| start | 1 | 124 |
+| +18 s | 4 | 2,759 |
+| +37 s | **6** (max = partitions) | 3,215 |
+| end of load | 6 | 9,251 (peak) |
+| +1 min after the load | 6 | **0**, backlog drained |
+| +5 min | **1** (default HPA scale-down stabilisation) | 0 |
+
+- **35,578** requests, 100% answered `202`, 0 failed, p95 **12 ms**.
+- **Exactly once:** MongoDB holds **35,581** votes = 35,578 from k6 + 3 manual ones; the tallies match the API
+  (cat 17,861 + dog 17,720). DLQ: 0 messages.
+- **Throughput ceiling ≈ 125 votes/s.** The worker cannot scale past the 6 partitions of `votes`, and with the
+  artificial 20 ms delay each one handles ~45 ms per message, so the backlog grew during the test and drained right after it.
+  Going higher means more partitions, batch processing (`eachBatch`) or several partitions in flight per worker.
+- **Bug caught here, not in a paid cluster:** KEDA could not reach Kafka because the `ScaledObject` used the short
+  service name, which does not resolve from KEDA's own namespace. Fixed in voting-gitops by qualifying it as
+  `voting-kafka-bootstrap.voting.svc`.
 
 ## Safety
 
