@@ -7,7 +7,8 @@ applications:
       - resources-finalizer.argocd.argoproj.io
     source:
       repoURL: https://github.com/anddr13/voting-gitops.git
-      targetRevision: main
+      # lab = main plus the ai-sre-agent stand and its chaos commits (see envs/local.yaml in voting-gitops).
+      targetRevision: lab
       path: apps
       helm:
         valueFiles:
