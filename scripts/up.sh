@@ -28,8 +28,16 @@ fi
 helm upgrade --install argocd argo-cd --repo https://argoproj.github.io/argo-helm \
   --version "$ARGOCD_CHART_VERSION" --namespace argocd --create-namespace \
   --values argocd-values.yaml --wait --timeout 15m
+# GITOPS_REVISION: another branch of voting-gitops than lab, for both the root and the child Applications
+# (a Helm parameter wins over envs/local.yaml). The ai-sre-agent EC2 stands use one branch each, lab-N,
+# because the backtest scenarios commit their breakages to the branch the stand follows.
+revision=()
+if [ -n "${GITOPS_REVISION:-}" ]; then
+  revision=(--set "applications.root.source.targetRevision=$GITOPS_REVISION"
+    --set-json "applications.root.source.helm.parameters=[{\"name\":\"gitops.targetRevision\",\"value\":\"$GITOPS_REVISION\"}]")
+fi
 helm upgrade --install root-app argocd-apps --repo https://argoproj.github.io/argo-helm \
-  --version "$ARGOCD_APPS_CHART_VERSION" --namespace argocd --values root-app.yaml
+  --version "$ARGOCD_APPS_CHART_VERSION" --namespace argocd --values root-app.yaml "${revision[@]}"
 
 echo "Argo CD is syncing voting-gitops: traefik/keda/strimzi -> data -> voting (~10 minutes)."
 for i in $(seq 1 120); do
