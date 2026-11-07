@@ -28,16 +28,23 @@ fi
 helm upgrade --install argocd argo-cd --repo https://argoproj.github.io/argo-helm \
   --version "$ARGOCD_CHART_VERSION" --namespace argocd --create-namespace \
   --values argocd-values.yaml --wait --timeout 15m
-# GITOPS_REVISION: another branch of voting-gitops than lab, for both the root and the child Applications
-# (a Helm parameter wins over envs/local.yaml). The ai-sre-agent GCE stands use one branch each, lab-N,
-# because the backtest scenarios commit their breakages to the branch the stand follows.
-revision=()
+# GITOPS_REPO_URL / GITOPS_REVISION: another copy or branch of voting-gitops, for both the root and the child
+# Applications (a Helm parameter wins over envs/local.yaml). The ai-sre-agent GCE stands serve their own copy
+# from the machine, so the backtest's breakage commits never reach GitHub.
+set_args=() params=()
+if [ -n "${GITOPS_REPO_URL:-}" ]; then
+  set_args+=(--set "applications.root.source.repoURL=$GITOPS_REPO_URL")
+  params+=("{\"name\":\"gitops.repoURL\",\"value\":\"$GITOPS_REPO_URL\"}")
+fi
 if [ -n "${GITOPS_REVISION:-}" ]; then
-  revision=(--set "applications.root.source.targetRevision=$GITOPS_REVISION"
-    --set-json "applications.root.source.helm.parameters=[{\"name\":\"gitops.targetRevision\",\"value\":\"$GITOPS_REVISION\"}]")
+  set_args+=(--set "applications.root.source.targetRevision=$GITOPS_REVISION")
+  params+=("{\"name\":\"gitops.targetRevision\",\"value\":\"$GITOPS_REVISION\"}")
+fi
+if ((${#params[@]})); then
+  set_args+=(--set-json "applications.root.source.helm.parameters=[$(IFS=,; echo "${params[*]}")]")
 fi
 helm upgrade --install root-app argocd-apps --repo https://argoproj.github.io/argo-helm \
-  --version "$ARGOCD_APPS_CHART_VERSION" --namespace argocd --values root-app.yaml "${revision[@]}"
+  --version "$ARGOCD_APPS_CHART_VERSION" --namespace argocd --values root-app.yaml "${set_args[@]}"
 
 echo "Argo CD is syncing voting-gitops: traefik/keda/strimzi -> data -> voting (~10 minutes)."
 for i in $(seq 1 120); do
